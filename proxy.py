@@ -47,11 +47,6 @@ class ProxyManager:
 
     def __init__(self):
         self.session: requests.Session = requests.Session()
-        self._anonymity = {
-            'transparent': Anonymity.TRANSPARENT,
-            'elite proxy': Anonymity.ELITE,
-            'anonymous': Anonymity.ANONYMOUS
-        }
 
     def _fetch_data(self) -> list[dict[str, V]]:
         """Fetch list of unchecked unfiltered proxies"""
@@ -63,17 +58,31 @@ class ProxyManager:
             parts = row.find_all('td')
             if len(parts) != 8:
                 continue
+            match parts[4].text.lower():
+                case 'transparent':
+                    anonymity = Anonymity.TRANSPARENT
+                case 'elite proxy':
+                    anonymity = Anonymity.ELITE
+                case 'anonymous':
+                    anonymity = Anonymity.ANONYMOUS
+                case _:
+                    anonymity = Anonymity.UNDETECTED
+            match parts[7].text.split(maxsplit=1):
+                case [x, 'secs ago']:
+                    checked_secs_ago = int(x)
+                case [x, 'minutes ago']:
+                    checked_secs_ago = int(x) * 60
+                case [x, _]:
+                    checked_secs_ago = int(x) * 3600
             proxies.append({
                 'ip': parts[0].text,
                 'port': int(parts[1].text),
                 'country_code': parts[2].text,
-                'anonymity': self._anonymity.get(
-                    parts[4].text.lower(), Anonymity.UNDETECTED
-                ),
+                'anonymity': anonymity,
                 'is_google': parts[5].text == 'yes',
                 'is_https': parts[6].text == 'yes',
                 'last_checked': (datetime.utcnow() - timedelta(
-                    minutes=int(parts[7].text.split()[0])
+                    seconds=checked_secs_ago
                 )).replace(microsecond=0)
             })
         return proxies
@@ -99,9 +108,9 @@ class ProxyManager:
         with ThreadPoolExecutor(max_workers=50) as executor:
             futures = [executor.submit(filter_func(x)) for x in data]
             return [
-                proxy for idx, (proxy, is_ok) in enumerate(zip(
+                proxy for proxy, is_ok in zip(
                     data, (f.result for f in futures)
-                )) if is_ok
+                ) if is_ok
             ]
 
     def cycle(self, filter_func: Callable = None, /) -> dict[str, V]:
